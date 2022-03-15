@@ -2065,6 +2065,384 @@ public MemberRepository memberRepository() {
   - @Configuration 을 붙이면 바이트코드를 조작하는 CGLIB 기술을 사용해서 싱글톤을 보장하지만, @Bean은 스프링 빈으로 등록만 해주고, 싱글톤 보장하지 않는다.
   - **결론은 스프링설정정보는 항상 @Configuration 사용해야 한다.**
 
+## 6. 컴포넌트 스캔
+
+### 6.1 컴포넌트 스캔과 의존관계 자동 주입 시작하기
+
+- 실무에서 등록해야 할 빈이 많다. -> 스프링은 설정 정보가 없어도 자동으로 빈 등록하는 컴포넌트 스캔이라는 기능을 제공
+- 의존 관계도 자동으로 주입하는 @Autowired라는 기능도 제공
+
+컴포넌트 스캔과 의존관계 자동 주입해보자!!
+
+기존 AppConfig.java는 과거 코드와 테스트를 유지하기 위해 남겨두고, 새로운 AutoAppConfig.java를 만들자.
+
+- AutoAppConfig.java
+
+```java
+package hello.core;
+
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.FilterType;
+
+@Configuration
+@ComponentScan( // 이전 실습에서 등록한 Configuration 어노테이션 붙은 설정 정보 제외
+        excludeFilters = @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = Configuration.class)
+)
+public class AutoAppConfig {
+
+}
+```
+
+- 컴포넌트 스캔을 사용하려면 먼저 @ComponentScan 을 설정 정보에 붙여주면 된다.
+- 기존의 AppConfig와는 다르게 @Bean으로 등록한 클래스가 하나도 없다!
+
+> 컴포넌트 스캔을 사용하면 @Configuration 이 붙은 설정 정보도 자동으로 등록되기 때문에, AppConfig, TestConfig 등 앞서 만들어두었던 설정 정보도 함께 등록되고, 실행되어 버린다. 그래서 excludeFilters 를 이용해서 설정정보는 컴포넌트 스캔 대상에서 제외했다. 보통 설정 정보를 컴포넌트 스캔 대상에서 제외하지는 않지만, 기존 예제 코드를 최대한 남기고 유지하기 위해서 이 방법을 선택했다.
+
+`컴포넌트 스캔`은 **이름 그대로 @Component 애노테이션이 붙은 클래스를 스캔해서 스프링 빈으로 등록**한다. @Component 를 붙여주자.
+
+- MemoryMemberRepository @Component 추가
+
+```java
+@Component
+public class MemoryMemberRepository implements MemberRepository {}
+```
+
+- RateDiscountPolicy @Component 추가
+
+```java
+@Component
+public class RateDiscountPolicy implements DiscountPolicy {}
+```
+
+- MemberServiceImpl @Component, @Autowired 추가
+
+```java
+@Component
+public class MemberServiceImpl implements MemberService {
+
+    private final MemberRepository memberRepository;
+    
+    @Autowired // 자동 생성 의존 관계 주입을 생성자에 붙이기
+    public MemberServiceImpl(MemberRepository memberRepository) {
+        this.memberRepository = memberRepository;
+    }
+}
+```
+
+- 이전에 AppConfig에서는 @Bean으로 직접 설정 정보를 작성했고, 의존 관계도 직접 명시했다. 이제는 **이런 설정 정보 자체가 없기 때문에 의존관계 주입도 이 클래스 안에서 해결해야 한다.**
+- `@Autowired는 의존 관계를 자동으로 주입`해준다. 
+
+- OrderServiceImpl @Component, @Autowired 추가
+
+```java
+@Component
+public class OrderServiceImpl implements OrderService{
+
+    private final MemberRepository memberRepository ;
+    private final DiscountPolicy discountPolicy ;
+    @Autowired
+    public OrderServiceImpl(MemberRepository memberRepository, DiscountPolicy discountPolicy) {
+        this.memberRepository = memberRepository;
+        this.discountPolicy = discountPolicy;
+    }
+}
+```
+
+`@Autowired 를 사용하면 생성자에서 여러 의존관계도 한번에 주입`받을 수 있다.
+
+- AutoAppConfigTest.java
+
+```java
+package hello.core.scan;
+
+import hello.core.AutoAppConfig;
+import hello.core.member.MemberService;
+import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+public class AutoAppConfigTest {
+    @Test
+    void basicScan() {
+        AnnotationConfigApplicationContext ac = new AnnotationConfigApplicationContext(AutoAppConfig.class);
+
+        MemberService memberService = ac.getBean(MemberService.class);
+        assertThat(memberService).isInstanceOf(MemberService.class); // 객체 타입 확인
+    }
+}
+```
+
+- AnnotationConfigApplicationContext 컨테이너 객체 생성해주고, 설정 정보로 AutoAppConfig 클래스 넘겨준다.
+- 로그를 보자. 컴포넌트 스캔이 잘 동작하는 것을 확인할 수 있다.
+
+> ClassPathBeanDefinitionScanner - Identified candidate component class:
+> .. RateDiscountPolicy.class
+> .. MemberServiceImpl.class
+> .. MemoryMemberRepository.class
+> .. OrderServiceImpl.class
+
+#### 1. @ComponentScan
+
+![img](https://user-images.githubusercontent.com/38436013/128150845-64358afb-c6d2-43fa-9f22-6f91812a6b20.png)
+
+- **@ComponentScan 은 @Component 가 붙은 모든 클래스를 스프링 빈으로 등록**한다.
+- 이때 스프링 빈의 기본 이름은 클래스명을 사용하되 맨 앞글자만 소문자를 사용한다.
+  \- **빈 이름 기본 전략**: MemberServiceImpl 클래스 memberServiceImpl
+  \- **빈 이름 직접 지정**: 만약 스프링 빈의 이름을 직접 지정하고 싶으면
+  @Component("memberService2") 이런식으로 이름을 부여하면 된다.
+
+#### 2. Autowired 의존관계 자동 주입
+
+![img](https://user-images.githubusercontent.com/38436013/128150876-f60c2122-1a86-40a0-967b-af3dc2a8b30e.png)
+
+- 생성자에 @Autowired 를 지정하면, 스프링 컨테이너가 자동으로 해당 스프링 빈을 찾아서 주입한다.
+- 이때 기본 조회 전략은 타입이 같은 빈을 찾아서 주입한다. (상속관계는 타입이 같다.)
+  - getBean(MemberRepository.class) 와 동일하다고 이해하면 된다.
+  - 컨테이너에 있는 MemberRepository를 타입으로 조회하여 같은 타입의 인스턴스(MemoMemberRepository)를 꺼낸다.
+
+### 6.2 탐색 위치와 기본 스캔 대상
+
+#### 탐색할 패키지의 시작 위치 지정
+
+모든 자바 클래스를 다 컴포넌트 스캔하면 시간이 오래 걸린다. 그래서 꼭 필요한 위치부터 탐색하도록 시작 위치를 지정할 수 있다.
+
+```java
+@Configuration
+@ComponentScan(
+    basePackages = "hello.core",
+    excludeFilters = @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = Configuration.class)
+)
+```
+
+- basePackages : 탐색할 패키지의 시작 위치를 지정한다. 이 패키지를 포함해서 하위 패키지를 모두 탐색한다.
+  - basePackages = {"hello.core", "hello.service"} 이렇게 여러 시작 위치를 지정할 수도 있다.
+- 만약 지정하지 않으면 @ComponentScan 이 붙은 설정 정보 클래스의 패키지가 시작 위치가 된다.
+
+#### 권장하는 방법
+
+패키지 위치를 지정하지 않고, 설정 정보 클래스의 위치를 프로젝트 최상단에 두는 것이다.
+
+프로젝트가 다음과 같이 구조가 되어 있으면
+
+com.hello
+com.hello.serivce
+com.hello.repository
+
+이렇게 하면 com.hello 를 포함한 하위는 모두 자동으로 컴포넌트 스캔의 대상이 된다.
+
+스프링 부트를 사용하면 스프링 부트의 대표 시작 정보인@SpringBootApplication 를 이 프로젝트 시작 루트 위치에 두는 것이 관례이다. (그리고 이 설정안에 바로 @ComponentScan 이 들어있다!)
+
+#### 컴포넌트 스캔 기본 대상
+
+- 컴포넌트 스캔은 `@Component`뿐만 아니라 다음 내용도 추가로 대상에 포함한다.
+  - `@Component` : 컴포넌트 스캔에서 사용
+  - `@Controlller` : 스프링 MVC 컨트롤러에서 사용
+  - `@Service` : 스프링 비즈니스 로직에서 사용
+  - `@Repository` : 스프링 데이터 접근 계층에서 사용
+  - `@Configuration` : 스프링 설정 정보에서 사용
+
+해당 클래스의 소스 코드를 보면 @Component 를 포함하고 있는 것을 알 수 있다.
+
+> 참고: 사실 애노테이션에는 상속관계라는 것이 없다. 그래서 이렇게 애노테이션이 특정 애노테이션을 들고있는 것을 인식할 수 있는 것은 스프링이 지원하는 기능이다.
+
+컴포넌트 스캔의 용도 뿐만 아니라 다음 애노테이션이 있으면 스프링은 `부가 기능`을 수행한다.
+
+> - @Controller : 스프링 MVC 컨트롤러로 인식
+> - @Repository : 스프링 데이터 접근 계층으로 인식하고, 데이터 계층의 예외를 스프링 예외로 변환해준다.
+> - @Configuration : 앞서 보았듯이 스프링 설정 정보로 인식하고, 스프링 빈이 싱글톤을 유지하도록 추가 처리를 한다.
+> - @Service : 사실 @Service 는 특별한 처리를 하지 않는다. 대신 개발자들이 핵심 비즈니스 로직이 여기에 있겠구나 라고 비즈니스 계층을 인식하는데 도움이 된다.
+
+### 6.3 필터
+
+- includeFilters : 컴포넌트 스캔 대상을 추가로 지정한다.
+- excludeFilters : 컴포넌트 스캔에서 제외할 대상을 지정한다.
+
+모든 코드는 테스트 코드에 추가
+
+- 컴포넌트 스캔 대상에 추가할 애노테이션
+
+```java
+package hello.core.scan.filter;
+
+import java.lang.annotation.*;
+
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface MyIncludeComponent {
+
+}
+```
+
+- 컴포넌트 스캔 대상에서 제외할 애노테이션
+
+```java
+package hello.core.scan.filter;
+
+import java.lang.annotation.Documented;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface MyExcludeComponent {
+
+}
+```
+
+- 컴포넌트 스캔 대상에 추가할 클래스
+
+```java
+package hello.core.scan.filter;
+
+@MyIncludeComponent
+public class BeanA {
+
+}
+```
+
+- 컴포넌트 스캔 대상에서 제외할 클래스
+
+```java
+package hello.core.scan.filter;
+
+@MyExcludeComponent
+public class BeanB {
+
+}
+```
+
+- 설정 정보와 전체 테스트 코드
+
+```java
+package hello.core.scan.filter;
+
+import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.FilterType;
+
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+public class ComponentFilterAppConfigTest {
+    @Test
+    void filterScan() {
+        ApplicationContext ac = new AnnotationConfigApplicationContext(ComponentFilterAppConfig.class);
+        BeanA beanA;
+        beanA = ac.getBean("beanA", BeanA.class);
+        Assertions.assertThat(beanA).isNotNull();
+
+//        ac.getBean("beanB", BeanB.class);
+        assertThrows(
+                NoSuchBeanDefinitionException.class,
+                () -> ac.getBean("beanB", BeanB.class)
+        );
+    }
+
+    @Configuration
+    @ComponentScan(
+            includeFilters = @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = MyIncludeComponent.class),
+            excludeFilters = @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = MyExcludeComponent.class)
+    )
+
+    static class ComponentFilterAppConfig {
+
+    }
+}
+```
+
+- includeFilters 에 MyIncludeComponent 애노테이션을 추가해서 BeanA가 스프링 빈에 등록된다.
+- excludeFilters 에 MyExcludeComponent 애노테이션을 추가해서 BeanB는 스프링 빈에 등록되지 않는다.
+
+#### FilterType 옵션
+
+FilterType은 5가지 옵션이 있다.
+
+- ANNOTATION: 기본값, 애노테이션을 인식해서 동작한다.
+  - ex) org.example.SomeAnnotation
+- ASSIGNABLE_TYPE: 지정한 타입과 자식 타입을 인식해서 동작한다.
+  - ex) org.example.SomeClass
+- ASPECTJ: AspectJ 패턴 사용
+  - ex) org.example..*Service+
+- REGEX: 정규 표현식
+  - ex) org.example.Default.*
+- CUSTOM: TypeFilter 이라는 인터페이스를 구현해서 처리
+  - ex) org.example.MyTypeFilter
+
+예를 들어서 BeanA도 빼고 싶으면 다음과 같이 추가하면 된다.
+
+```java
+@ComponentScan(
+    includeFilters = {
+        @Filter(type = FilterType.ANNOTATION, classes =
+        MyIncludeComponent.class),
+    },
+    excludeFilters = {
+        @Filter(type = FilterType.ANNOTATION, classes =
+        MyExcludeComponent.class),
+        @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = BeanA.class)
+    }
+)
+```
+
+> @Component 면 충분하기 때문에, includeFilters 를 사용할 일은 거의 없다. excludeFilters는 여러가지 이유로 간혹 사용할 때가 있지만 많지는 않다.
+
+### 6.4 중복 등록과 충돌
+
+컴포넌트 스캔에서 같은 빈 이름을 등록하면 어떻게 될까?
+
+#### 자동 빈 등록 vs 자동 빈 등록
+
+- 컴포넌트 스캔에 의해 자동으로 스프링 빈이 등록되는데, 그 이름이 같은 경우 스프링은 오류를 발생시킨다.
+  - `ConflictingBeanDefinitionException` 예외 발생
+
+#### 수동 빈 등록 vs 자동 빈 등록
+
+만약 수동 빈 등록과 자동 빈 등록에서 빈 이름이 충돌되면 어떻게 될까?
+
+```null
+@Component
+public class MemoryMemberRepository implements MemberRepository {}
+@Configuration
+@ComponentScan(
+    excludeFilters = @Filter(type = FilterType.ANNOTATION, classes =
+Configuration.class)
+)
+public class AutoAppConfig {
+    @Bean(name = "memoryMemberRepository")
+    public MemberRepository memberRepository() {
+        return new MemoryMemberRepository();
+    }
+}
+```
+
+이 경우 수동 빈 등록이 우선권을 가진다.
+(수동 빈이 자동 빈을 오버라이딩 해버린다.)
+
+#### 수동 빈 등록시 남는 로그
+
+> Overriding bean definition for bean 'memoryMemberRepository' with a different definition: replacing
+
+수동 빈 설정이 꼬이면 잡기 어려운 버그가 만들어진다. 최근 스프링 부트에서는 수동 빈 등록과 자동 빈 등록이 충돌나면 오류가 발생하도록 기본 값을 바꾸었다.
+
+#### 수동 빈 등록, 자동 빈 등록 오류시 스프링 부트 에러
+
+> Consider renaming one of the beans or enabling overriding by setting
+> spring.main.allow-bean-definition-overriding=true
+
+스프링 부트인 CoreApplication 을 실행해보면 오류를 볼 수 있다.
+
+
+
 ## 질문
 
 - ch2. join하지 않는 이유

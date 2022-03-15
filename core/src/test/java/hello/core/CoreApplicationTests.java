@@ -20,5 +20,4 @@ class CoreApplicationTests {
 		//출력: bean = class hello.core.AppConfig$$EnhancerBySpringCGLIB$$bd479d70
 		System.out.println("bean = " + bean.getClass());
 	}
-
 }
